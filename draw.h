@@ -20,5 +20,6 @@ struct rgb_conv {
 	int rskp, gskp, bskp;
 	int rmax, gmax, bmax;
 };
+void fill_rgb_conv(int mode, struct rgb_conv *s);
 void fb_set(int r, int c, void *mem, int len);
 unsigned fb_val(int r, int g, int b);

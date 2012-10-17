@@ -22,11 +22,13 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <linux/input.h>
+
 #include "draw.h"
 #include "vnc.h"
+#include "vncauth.h"
 
 /* framebuffer depth */
-typedef unsigned int fbval_t;
+typedef unsigned short fbval_t;
 
 /* optimized version of fb_val() */
 #define FB_VAL(r, g, b)	fb_val((r), (g), (b))
@@ -35,6 +37,7 @@ typedef unsigned int fbval_t;
 #define MAX(a, b)	((a) > (b) ? (a) : (b))
 
 #define VNC_PORT		"5900"
+#define FBVNC_VERSION	"1.0.1"
 
 #define MAXRES			(1 << 12)
 
@@ -46,6 +49,8 @@ static int nodraw;		/* don't draw anything */
 
 static char buf[MAXRES];
 #define MAXPIX		(MAXRES/sizeof(fbval_t))
+
+static char *passwd_file = NULL, *passwd_save = NULL;
 
 static int vnc_connect(char *addr, char *port)
 {
@@ -75,7 +80,7 @@ static struct rgb_conv format;
 static int vnc_init(int fd)
 {
 	static int vncfmt[] = { 0x40888, 0x20565, 0x10233, 0 };
-	char vncver[12];
+	char vncver[12] = {0};
 	int i;
 
 	struct vnc_client_init clientinit;
@@ -86,10 +91,87 @@ static int vnc_init(int fd)
 	write(fd, "RFB 003.003\n", 12);
 	read(fd, vncver, 12);
 
+	vncver[11] = '\0';
+	printf("VNC server protocol version: %s.\n", vncver);
+
 	read(fd, &connstat, sizeof(connstat));
 
-	if (ntohl(connstat) != VNC_CONN_NOAUTH)
+	if (ntohl(connstat) == VNC_CONN_FAILED) {
+		char *buf = NULL;
+
+		i = read(fd, &connstat, sizeof(connstat));
+		// try to get reason from server
+		if (i == sizeof(connstat)) {
+			buf = calloc(1, ntohl(connstat) + 1);
+			if (buf) {
+				i = read(fd, buf, ntohl(connstat));
+				// Didn't receive correct data, maybe version mismatch
+				if (i != sizeof(connstat)) {
+					free(buf);
+					buf = NULL;
+				}
+			}
+		}
+		if (buf == NULL)
+			fprintf(stderr, "VNC init failed - Unknown reason, maybe version mismatch?\n");
+		else {
+			fprintf(stderr, "VNC init failed - %s\n", buf);
+			free(buf);
+		}
 		return -1;
+	}
+
+	if (ntohl(connstat) == VNC_CONN_AUTH) {
+		unsigned char challenge[CHALLENGESIZE];
+		char *passwd = NULL;
+
+		if (read(fd, challenge, sizeof(challenge)) != sizeof(challenge))
+			return -2;
+
+		if (passwd_file) {
+			passwd = vncDecryptPasswdFromFile(passwd_file);
+		} else {
+			passwd = getpass("Password: ");
+			if (strlen(passwd) == 0) {
+				fprintf(stderr, "Reading password failed\n");
+				return -3;
+			}
+			if (strlen(passwd) > MAXPWLEN) {
+				passwd[MAXPWLEN] = '\0';
+			}
+		}
+
+		vncEncryptBytes(challenge, passwd);
+
+		write(fd, challenge, sizeof(challenge));
+		i = read(fd, &connstat, sizeof(connstat));
+		if (i != sizeof(connstat)) {
+			fprintf(stderr, "Invalid response from VNC server\n");
+			return -4;
+		}
+
+		switch (ntohl(connstat))
+		{
+		case VNC_AUTH_OK:
+			printf("VNC authentication succeeded\n");
+			if (passwd_save) {
+				vncEncryptAndStorePasswd(passwd, passwd_save);
+			}
+			break;
+		case VNC_AUTH_FAILED:
+			fprintf(stderr, "VNC authentication failed\n");
+			break;
+		case VNC_AUTH_TOOMANY:
+			fprintf(stderr, "VNC authentication failed - too many tries\n");
+			return -5;
+		default:
+			fprintf(stderr, "Unknown VNC authentication result: %d\n", ntohl(connstat));
+			return -6;
+		}
+
+		// clear password in memory
+		memset(passwd, 0, strlen(passwd));
+	}
 
 	clientinit.shared = 1;
 	write(fd, &clientinit, sizeof(clientinit));
@@ -461,25 +543,64 @@ static int mainloop(int vnc_fd, int kbd_fd, int rat_fd)
 	return err;
 }
 
+void show_usage(char *prog)
+{
+	printf("Usage : %s [options] server [port]\n", prog);
+	printf("Valid options:\n");
+	printf("\t[-b bpp-bits] specify bits per pixel\n");
+	printf("\t[-p passwd-file] read encrypted password from this file\n");
+	printf("\t[-w save-passwd-file] write encrypted password to this file\n");
+	printf("\t[-h] show this help message\n");
+	printf("\t[-v] show version information\n");
+}
+
+void show_version(char *prog)
+{
+	printf("%s "FBVNC_VERSION" - Uranus Zhou\n\n", prog);
+}
+
 int main(int argc, char * argv[])
 {
 	char *port = VNC_PORT;
 	char *host = "127.0.0.1";
 	struct termios ti;
 	int vnc_fd, rat_fd, status;
-	
-	if (argc < 2) {
-		fprintf(stderr, "Usage : fbvnc [-bpp bits] server [port]\n");
-		return 0;
-  	}
-  	if (*argv[1] == '-' && argc >= 3) {
-  		argc -= 2; argv += 2;
-  		bpp = atoi(argv[0]) >> 3;
-  	}
-	if (argc >= 2)
-		host = argv[1];
-	if (argc >= 3)
-		port = argv[2];
+
+	while (1)
+	{
+		int ch = getopt(argc, argv, "b:p:w:hv");
+		if (ch == -1) break;
+		switch (ch)
+		{
+		case 'b':
+  			bpp = atoi(optarg) >> 3;
+			break;
+		case 'p':
+			passwd_file = optarg;
+			break;
+		case 'w':
+			passwd_save = optarg;
+			break;
+		case 'h':
+			show_usage(argv[0]);
+			return 0;
+		case 'v':
+			show_version(argv[0]);
+			return 0;
+		}
+	}
+
+	if (argc <= optind) {
+		show_usage(argv[0]);
+		return 1;
+	}
+
+	show_version(argv[0]);
+
+	host = argv[optind];
+	if (argc > optind + 1)
+		port = argv[optind + 1];
+
 	if ((vnc_fd = vnc_connect(host, port)) < 0) {
 		fprintf(stderr, "could not connect! %s %s : %d\n",
 			host,port,vnc_fd);
@@ -487,6 +608,7 @@ int main(int argc, char * argv[])
 	}
 	status = vnc_init(vnc_fd);
 	if (status < 0) {
+		close(vnc_fd);
 		fprintf(stderr, "vnc init failed! %d\n", status);
 		return 2;
 	}
