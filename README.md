@@ -6,13 +6,13 @@ patched framebuffer VNC client for embeded system like Raspberry Pi
 
 There is already a framebuffer VNC client for Linux:
 
-[http://pocketworkstation.org/fbvnc.html](http://pocketworkstation.org/fbvnc.html)
+<http://pocketworkstation.org/fbvnc.html>
 
 While this also comes with some bugs, and its size seems not suitable for tiny embeded system.
 
 Then I found this fbvnc project:
 
-[http://repo.or.cz/w/fbvnc.git](http://repo.or.cz/w/fbvnc.git)
+<http://repo.or.cz/w/fbvnc.git>
 
 Very lightweight, some function works fine, sadly still some bugs with this fbvnc.
 
