@@ -20,7 +20,7 @@ So, I decide to make this fbvnc project better for embeded system.
 These things should be done later:
 
 * try to fix 16/32 bits color display bug (DONE)
-* add VNC authentication support
+* add VNC authentication support (DONE)
 * better mouse event support
 * ...
 
