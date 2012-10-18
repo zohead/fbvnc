@@ -88,11 +88,16 @@ static int vnc_init(int fd)
 	struct vnc_client_pixelfmt pixfmt_cmd;
 	int connstat = VNC_CONN_FAILED;
 
-	write(fd, "RFB 003.003\n", 12);
 	read(fd, vncver, 12);
+	write(fd, "RFB 003.003\n", 12);
 
 	vncver[11] = '\0';
 	printf("VNC server protocol version: %s.\n", vncver);
+
+	if (strncmp(vncver, "RFB ", 4) != 0) {
+		fprintf(stderr, "Unregonized VNC server protocol version\n");
+		return -7;
+	}
 
 	read(fd, &connstat, sizeof(connstat));
 
