@@ -22,6 +22,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <linux/input.h>
+#include <syslog.h>
 
 #include "draw.h"
 #include "vnc.h"
@@ -37,7 +38,7 @@ typedef unsigned short fbval_t;
 #define MAX(a, b)	((a) > (b) ? (a) : (b))
 
 #define VNC_PORT		"5900"
-#define FBVNC_VERSION	"1.0.1"
+#define FBVNC_VERSION	"1.0.2"
 
 #define MAXRES			(1 << 12)
 
@@ -349,7 +350,7 @@ static int vnc_event(int fd)
 
 static int rat_event(int fd, int ratfd)
 {
-	char ie[3];
+	signed char ie[3];
 	struct vnc_client_ratevent me = {VNC_CLIENT_RATEVENT};
 	int mask = 0;
 	int refresh = 2;
@@ -360,6 +361,7 @@ static int rat_event(int fd, int ratfd)
 		return 0;
 	mc += ie[1];
 	mr -= ie[2];
+	//syslog(LOG_INFO, "mc: %d, mr: %d, x: %d, y: %d.\n", mc, mr, ie[1], ie[2]);
 	if (mc < oc) {
 		if ((oc -= cols / 5) < 0)
 			oc = 0;
@@ -491,11 +493,9 @@ static int kbd_event(int fd, int kbdfd)
 static void term_setup(struct termios *ti)
 {
 	struct termios termios;
-	char *hide = "\x1b[?25l";
-	char *clear = "\x1b[2J";
 
-	write(STDIN_FILENO, hide, strlen(hide));
-	write(STDOUT_FILENO, clear, strlen(clear));
+	dprintf(STDOUT_FILENO, "\033[2J");	// clear screen
+	dprintf(STDOUT_FILENO, "\033[?25l");	// hide cursor
 	showmsg();
 	tcgetattr(0, &termios);
 	*ti = termios;
@@ -505,9 +505,9 @@ static void term_setup(struct termios *ti)
 
 static void term_cleanup(struct termios *ti)
 {
-	char *show = "\x1b[?25h";
 	tcsetattr(0, TCSANOW, ti);
-	write(STDIN_FILENO, show, strlen(show));
+	dprintf(STDOUT_FILENO, "\033[2J");	// clear screen
+	dprintf(STDOUT_FILENO, "\033[?25h");	// show cursor
 }
 
 static int mainloop(int vnc_fd, int kbd_fd, int rat_fd)

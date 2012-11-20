@@ -21,7 +21,7 @@ These things should be done later:
 
 * try to fix 16/32 bits color display bug (DONE)
 * add VNC authentication support (DONE)
-* better mouse event support
+* better mouse event support (DONE)
 * ...
 
 ## Notes about framebuffer depth (Raspbery Pi) ##
